@@ -56,25 +56,33 @@ deacay_rate = 0.00001
 discounted_rate = 0.9
 
 memory_size = 1000000
+def convolution_output(width, height, stride, padding, kernel):
+    width = ((width - kernel + 2*padding)/stride) + 1
+    height = ((height - kernel + 2*padding)/stride) + 1
+    return width, height
+
 
 #build network architecture
 class DeepQNet(nn.Module):
     """docstring forDeepQNet."""
     def __init__(self, state_size, action_size):
         super(DeepQNet, self).__init__()
-        self.conv1 = nn.Conv2d(4,16,3,stride = 1, padding = 1)
-        self.conv2 = nn.Conv2d(16,32,3,stride = 1, padding = 1)
-        self.conv3 = nn.Conv2d(32,64,3,stride = 1, padding = 1)
-        self.height, self.width = env.observation_space
-        self.fc1 = nn.Linear((self.height/8)*(self.width/8)*64,100)
+        self.conv1 = nn.Conv2d(4,16,8,stride = 4)
+        width, height = convolution_output(state_size.shape[2], state_size.shape[3], stride = 4, padding = 1, kernel = 8)
+        self.conv2 = nn.Conv2d(16,32,4,stride = 2)
+        width, height = convolution_output(state_size.shape[2], state_size.shape[3], stride = 2, padding = 1, kernel = 4)
+        self.conv3 = nn.Conv2d(32,32,3,stride = 1)
+        width, height = convolution_output(state_size.shape[2], state_size.shape[3], stride = 1, padding = 1, kernel = 3)
+        self.fc1 = nn.Linear((height)*(width)*32,100)
         self.fc2 = nn.Linear(100, action_size)
         self.pool = nn.MaxPool2d(2,2)
         self.dropout = nn.Dropout(0.2)
     def forward(self,x):
         x = self.pool(F.relu(self.conv1(x)))
+
         x = self.pool(F.relu(self.conv2(x)))
         x = self.pool(F.relu(self.conv3(x)))
-        x = x.view(-1,(self.height/8)*(self.width/8)*64)
+        x = x.view(-1,x.shape[2]*x.shape[3])
         x = self.dropout(x)
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
@@ -150,3 +158,4 @@ for i in range(total_episodes):
             loss.backward()
             DQN_optimizer.step()
             loss.append(loss)
+
