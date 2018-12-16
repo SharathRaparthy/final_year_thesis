@@ -1,4 +1,4 @@
-import sys
+mport sys
 import argparse
 import numpy as np
 from collections import deque
@@ -25,7 +25,7 @@ parser.add_argument('--env-name', default=None)
 #parser.add_argument('--draw-curve', action='store_true', help='draw the lane following curve')
 #parser.add_argument('--draw-bbox', action='store_true', help='draw collision detection bounding boxes')
 #parser.add_argument('--domain-rand', action='store_true', help='enable domain randomization')
-parser.add_argument('--frame-skip', default=1, type=int, help='number of frames to skip')
+parser.add_argument('--frame-skip', default=3, type=int, help='number of frames to skip')
 args = parser.parse_args()
 if args.env_name is None:
     env = DuckietownEnv(
@@ -42,9 +42,11 @@ env.render()
 #possible_actions = np.array(np.identity(env.action_space.n, dtype=int)).tolist() #change
 #possible_actions = env.action_space
 
-action_1 = np.array([0.44, 0.0])
-action_2 = np.array([0.35, +1])
-possible_actions = [action_1,action_2]
+up = np.array([0.44, 0.0])
+stop = np.array([0.0,0.0])
+left = np.array([0.35,-1])
+right = np.array([0.35, +1])
+possible_actions = [up,stop,left,right]
 
 
 #print(possible_actions)
@@ -65,9 +67,9 @@ stacked_frames  =  deque([np.zeros((84,84), dtype=np.int) for i in range(stack_s
 def stack_images(stacked_frames, state, new_episode):
 
     frame = data_preprocess(state)
-    stack_size = 4
+    #stack_size = 4
     if new_episode:
-        stacked_frames = deque([torch.zeros(state.shape) for i in range(stack_size)], maxlen=4)
+        stacked_frames = deque([torch.zeros(state.shape) for i in range(stack_size)], maxlen=4)#state.shape returns (120,160,3) but we require only 1 channel
         stacked_frames.append(frame)
         stacked_frames.append(frame)
         stacked_frames.append(frame)
@@ -83,12 +85,12 @@ def stack_images(stacked_frames, state, new_episode):
 # def num_nodes(W,H, fw, fh, sw, sh, P)
 # 	width = ((W-fw+2*P)/sw + 1)
 # 	height = ((H-fh+2*P)/sh + 1)
-	
+
 # 	return width, height
 
 
 
-	
+
 
 #Hyper-parameters (check once again)
 #action_size = env.action_space.
@@ -172,7 +174,7 @@ def compute_loss(batch_size, done_episode):
     q_values = DQN(state)
     q_value = q_values.max(1)[0]
 
-    if done_episode: 
+    if done_episode:
     	next_q_values = reward
     else:
     	next_q_values = DQN(next_state)
@@ -198,15 +200,15 @@ for i in range(total_episodes):
     episode_rewards = []
     state = env.reset()
     state, stacked_frames = stack_images(stacked_frames, state.transpose((2, 0, 1)), True)
-    print('hhi') 
+    print('hhi')
 
     while step < total_steps:
         step = step + 1
         decay_step += 1
         epsilon = explore_stop + (explore_start - explore_stop) * np.exp(-decay_rate * decay_step)
         print('koi')
- 
-        
+
+
         if step == total_steps:
             total_steps = step
             print('sugoi')
@@ -215,22 +217,39 @@ for i in range(total_episodes):
         	print(len(replay_buffer))
         	action = DQN.act(state, epsilon)
         	next_state, reward, done, _ = env.step(action)
-        	episode_rewards.append(reward)	
+        	episode_rewards.append(reward)
 	        next_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
 	        replay_buffer.push(state, action, reward, next_state, done)
 	        env.render()
         	if reward < -2:
         		break
         	else:
-	        	
+                    if len(replay_buffer) > batch_size:
+                        DQN_optimizer.zero_grad()
+                        loss = compute_loss(batch_size, done)
+                        loss.backward()
+                        DQN_optimizer.step()
+                        loss_list.append(loss)
+                        state = next_state
+                        print('Step')
 
-	        	if len(replay_buffer) > batch_size:
-	        		print('hello')
-	        		
-	        		DQN_optimizer.zero_grad()
-	        		loss = compute_loss(batch_size, done)
-	        		loss.backward()
-	        		DQN_optimizer.step()
-	        		loss_list.append(loss)
-	        		state = next_state
-	        		print('Step')
+#evaluation
+
+####Save trained_parameters
+PATH =  "./trained_parameters"
+torch.save(DQN.state_dict(),PATH)
+
+
+####Load trained_parameters and test trained agent
+DQN.load_state_dict(torch.load(PATH))
+DQN.eval()
+
+state = env.reset()
+state, stacked_frames = stack_images(stacked_frames, state.transpose((2, 0, 1)), True)
+for i in range(50000):
+    action = DQN.act(state, epsilon)
+    next_state, reward, done, _ = env.step(action)
+    next_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
+    state = next_state
+
+print('Evaluation finished')
