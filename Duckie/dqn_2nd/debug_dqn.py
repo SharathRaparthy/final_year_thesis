@@ -129,11 +129,11 @@ class DeepQNet(nn.Module):
             state = Variable(torch.FloatTensor(state))
             state = state.unsqueeze(0)
             #state size should be (None,4,84,84) i.e. 4D inputs
-            print("state for exploitation is:",state.shape)
+            #print("state for exploitation is:",state.shape)
             q_values = self.forward(state)
-            print(q_values.shape) #(64,4,1)
+            #print(q_values.shape) #(64,4,1)
             action = possible_actions[q_values.max(1)[1]] #check for vector column or row
-            print("action shape at exploitation:",action.shape)#(64,1) doubtful
+            #print("action shape at exploitation:",action.shape)#(64,1) doubtful
         else:
             action = possible_actions[random.randrange(len(possible_actions))]
             print("Exploration going on")
@@ -149,7 +149,7 @@ def compute_loss(batch_size, state_batch, action_batch, reward_batch, next_state
     next_state_batch = Variable(torch.FloatTensor(next_state_batch).cuda())
     done_episode = Variable(torch.FloatTensor(done_episode).cuda())
     '''
-    #print("going into loss")
+
     state_batch = Variable(torch.FloatTensor(state_batch))
     action_batch = Variable(torch.FloatTensor(action_batch))
     reward_batch = Variable(torch.FloatTensor(reward_batch))
@@ -164,6 +164,7 @@ def compute_loss(batch_size, state_batch, action_batch, reward_batch, next_state
     #print("q_values:", q_values.shape)
     #print("action_batch",action_batch.shape)
 
+    #obtain q_values from network correspoding to the actions collected in memory buffer
     q_values = torch.bmm(action_batch.unsqueeze(1),DQN(state_batch).unsqueeze(2))
 
     next_q_values = DQN(next_state_batch) #nex_q_values --> (64,4)
@@ -259,7 +260,7 @@ for i in range(total_episodes):
             DQN_optimizer.step()
 
             loss_list.append(loss)
-            print(f'Episode number is {i}/{total_episodes} | Step number is {step} | Loss is {loss}')
+            print('Episode number is {0}/{1} | Step number is {2} | Loss is {3}'.format(i,total_episodes,step,loss))
             #print("Loss",loss)
         else:
             #for making agent explore
@@ -290,7 +291,7 @@ for i in range(total_episodes):
 
 
 #-------------------------------------------------evaluation------------------------------------------#
-'''
+
 ####Save trained_parameters
 PATH =  "./trained_parameters"
 torch.save(DQN.state_dict(),PATH)
@@ -312,9 +313,9 @@ for i in range(eval_steps):
     action = DQN.act(stacked_state, epsilon,e)
     next_state, reward, done, _ = env.step(action)
     next_stacked_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
-    env.render()
+    print('Eval_steps number is {0}'.format(eval_steps))
     eval_rewards.append(reward)
     stacked_state = next_stacked_state
+    env.rener()
 
 print('Evaluation finished')
-'''
