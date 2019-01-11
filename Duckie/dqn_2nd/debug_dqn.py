@@ -9,7 +9,7 @@ from torch.autograd import Variable
 import random
 from skimage import transform
 import torch.nn.functional as F
-
+import sys
 ##import libraries related to DuckietownEnv
 import argparse
 import gym_duckietown
@@ -18,8 +18,8 @@ from gym_duckietown.simulator import Simulator
 #from gym_duckietown.wrappers import UndistortWrapper
 
 # if gpu is to be used
-#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cpu")
 
 ####All arguments
 parser = argparse.ArgumentParser()
@@ -29,22 +29,25 @@ parser.add_argument('--env-name', default=None)
 #parser.add_argument('--draw-bbox', action='store_true', help='draw collision detection bounding boxes')
 #parser.add_argument('--domain-rand', action='store_true', help='enable domain randomization')
 parser.add_argument('--frame-skip', default=3, type=int, help='number of frames to skip')
+parser.add_argument('--flag', default=1, type=int, help='number of frames to skip')
+
 args = parser.parse_args()
 
+#flag to switch between training and Evaluation
+flag = args.flag
 if args.env_name is None:
     env = DuckietownEnv(
         frame_skip=args.frame_skip
     )
 else:
     env = gym.make(args.env_name)
+
 #initialise the environment
-
 #actions
-
-up = np.array([0.44, 0.0])
+up = np.array([0.22, 0.0])
 stop = np.array([0.0,0.0])
-left = np.array([0.35,-1])
-right = np.array([0.35, +1])
+left = np.array([0.22,-1])
+right = np.array([0.22, +1])
 
 possible_actions = [up,stop,left,right]
 #possible_actions = np.array(possible_actions) #<type 'numpy.ndarray'>  (4,2)
@@ -65,7 +68,7 @@ stack_size = 4
 stacked_frames  =  deque([np.zeros((84,84), dtype=np.int) for i in range(stack_size)], maxlen=4)
 #returns stacked_frames-->Type: <type 'collections.deque'>  Size: (84,84,4)
 
-#        stacked_state --> Type: np.ndarray                 Size: (84,84,4)
+#stacked_state --> Type: np.ndarray                 Size: (84,84,4)
 def stack_images(stacked_frames, state, new_episode):
     frame = data_preprocess(state)
     if new_episode:
@@ -87,7 +90,7 @@ def stack_images(stacked_frames, state, new_episode):
 #Training parameters
 action_size = 4 #[left,rigth,up,stop]
 gamma = 0.95
-total_episodes = 2000
+total_episodes = 50000
 total_steps = 15000
 batch_size = 64
 #Exploration-Exploitation parameters
@@ -125,37 +128,37 @@ class DeepQNet(nn.Module):
     def act(self,state, epsilon, e):
         #exploit
         if e > epsilon:
-            #state = Variable(torch.FloatTensor(state).cuda())
-            state = Variable(torch.FloatTensor(state))
+            state = Variable(torch.FloatTensor(state).cuda())
+            #state = Variable(torch.FloatTensor(state))
             state = state.unsqueeze(0)
             #state size should be (None,4,84,84) i.e. 4D inputs
-            #print("state for exploitation is:",state.shape)
+            print("exploitation started")
             q_values = self.forward(state)
             #print(q_values.shape) #(64,4,1)
             action = possible_actions[q_values.max(1)[1]] #check for vector column or row
             #print("action shape at exploitation:",action.shape)#(64,1) doubtful
         else:
             action = possible_actions[random.randrange(len(possible_actions))]
-            print("Exploration going on")
+            #print("Exploration going on")
         return action
 
 ####Calculate Loss for training
 def compute_loss(batch_size, state_batch, action_batch, reward_batch, next_state_batch, done_episode):
     #convert state,action,reward,next_state,done_episode to tensor Variable
-    '''
+
     state_batch = Variable(torch.FloatTensor(state_batch).cuda())
-    action_batch = Variable(torch.LongTensor(action_batch).cuda())
+    action_batch = Variable(torch.FloatTensor(action_batch).cuda())
     reward_batch = Variable(torch.FloatTensor(reward_batch).cuda())
     next_state_batch = Variable(torch.FloatTensor(next_state_batch).cuda())
     done_episode = Variable(torch.FloatTensor(done_episode).cuda())
-    '''
 
+    '''
     state_batch = Variable(torch.FloatTensor(state_batch))
     action_batch = Variable(torch.FloatTensor(action_batch))
     reward_batch = Variable(torch.FloatTensor(reward_batch))
     next_state_batch = Variable(torch.FloatTensor(next_state_batch))
     done_episode = Variable(torch.FloatTensor(done_episode))
-
+    '''
     #print("action_batch size:",action_batch.shape)
     #print("DQN(state_batch)",DQN(state_batch).shape)
     #action = action.unsqueeze(1)
@@ -195,127 +198,128 @@ class BufferReplay(object):
 replay_buffer = BufferReplay(memory_size)
 #initialise network and optimizers
 state = env.reset()
-#DQN = DeepQNet(state).cuda()
-DQN = DeepQNet(state)
+DQN = DeepQNet(state).cuda()
+#DQN = DeepQNet(state)
 DQN_optimizer = optim.Adam(DQN.parameters(), lr = 0.0002)
 loss_list = []
 
 
 #####------------training loop-----------------#########
-for i in range(total_episodes):
-    step = 0
-    decay_step = 0
-    episode_rewards = []
-    state = env.reset() #(84,84,3)
-    state = state.transpose((2, 0, 1))#convert from HWC to CHW
-    stacked_state, stacked_frames = stack_images(stacked_frames, state, True) #(4,84,84)
+if flag ==1:
+    for i in range(total_episodes):
+        step = 0
+        decay_step = 0
+        episode_rewards = []
+        state = env.reset() #(84,84,3)
+        state = state.transpose((2, 0, 1))#convert from HWC to CHW
+        stacked_state, stacked_frames = stack_images(stacked_frames, state, True) #(4,84,84)
+        while step < total_steps:
+            #epsilon greedy approach
+            step = step + 1
+            decay_step += 1
+            #exponential decay of exploration rate
+            epsilon = explore_stop + (explore_start - explore_stop) * np.exp(-decay_rate * decay_step)
 
-    while step < total_steps:
-        #epsilon greedy approach
-        step = step + 1
-        decay_step += 1
-        #exponential decay of exploration rate
-        epsilon = explore_stop + (explore_start - explore_stop) * np.exp(-decay_rate * decay_step)
+            #if buffer size crosses batch_size
+            if len(replay_buffer) > batch_size:
 
-        #if buffer size crosses batch_size
-        if len(replay_buffer) > batch_size:
+                if len(replay_buffer) == batch_size:
+                    loss = 0
 
-            if len(replay_buffer) == batch_size:
-                loss = 0
+                e = random.random()
+                #state = stacked_state #(4,84,84)
 
-            e = random.random()
-            #state = stacked_state #(4,84,84)
+                action = DQN.act(stacked_state, epsilon, e)
+                next_state, reward, done, _ = env.step(action)
 
-            action = DQN.act(stacked_state, epsilon, e)
+                next_stacked_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
 
-            print("Action:", action)
+                #mapped duckietown action to mapped action
+                if np.array_equal(action,up):
+                    action = mapped_actions[0]
+                elif np.array_equal(action,stop):
+                    action = mapped_actions[1]
+                elif np.array_equal(action,left):
+                    action = mapped_actions[2]
+                elif np.array_equal(action,right):
+                    action = mapped_actions[3]
+
+
+                #push Experience to buffer
+                replay_buffer.push(stacked_state, action, reward, next_stacked_state, done)
+                episode_rewards.append(reward)
+
+                #For LOSS ONLY
+                #sample mini_batch from buffer:   state_batch and next_state_batch --> (64,4,84,84)  action_batch and reward_batch --> (64,1)
+                state_batch, action_batch, reward_batch, next_state_batch, done = replay_buffer.sample(batch_size)
+                #print("action_batch:",action_batch)
+                #pass mini-batches for Calculation of loss
+                DQN_optimizer.zero_grad()
+                loss = compute_loss(batch_size, state_batch, action_batch, reward_batch, next_state_batch, done)
+                loss.backward()
+                DQN_optimizer.step()
+
+                loss_list.append(loss)
+                print('Episode number is {0}/{1} | Step number is {2} | Loss is {3}'.format(i,total_episodes,step,loss))
+                #print("Loss",loss)
+            else:
+                #for making agent explore
+                e = (random.random())%epsilon
+
+                action = DQN.act(stacked_state, epsilon, e)
+                next_state, reward, done, _ = env.step(action)
+
+                next_stacked_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
+
+                #mapped duckietown action to mapped action
+                if np.array_equal(action,up):
+                    action = mapped_actions[0]
+                elif np.array_equal(action,stop):
+                    action = mapped_actions[1]
+                elif np.array_equal(action,left):
+                    action = mapped_actions[2]
+                elif np.array_equal(action,right):
+                    action = mapped_actions[3]
+
+                replay_buffer.push(stacked_state, action, reward, next_stacked_state, done)
+                episode_rewards.append(reward)
+
+            stacked_state = next_stacked_state
+            if reward<0.15:
+                break
+
+        ####Save trained_parameters for every 5000 episodes
+        if  i%5000 == 0:
+            PATH =  "./trained_parameters.pth"
+            torch.save(DQN.state_dict(),PATH)
+else:
+    #-------------------------------------------------evaluation------------------------------------------#
+    PATH =  "./trained_parameters.pth"
+    #Evaluation parameters
+    eval_steps = 50000
+    eval_rewards = []
+    ####Load trained_parameters and test trained agent
+    DQN.load_state_dict(torch.load(PATH))
+    # DQN.eval()
+
+    #(84,84,3)
+    for episodes in range(1000):
+        print("episode no. " + str(episodes))
+        state = env.reset()
+
+        stacked_state, stacked_frames = stack_images(stacked_frames, state.transpose((2, 0, 1)), True)
+        for i in range(eval_steps):
+            e = 0.8
+            epsilon = 0.5
+            action = DQN.act(stacked_state, epsilon,e)
             next_state, reward, done, _ = env.step(action)
-            print("Reward:", reward)
-
+            print("action " + str(action))
             next_stacked_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
+            print('Eval_steps number is {0}'.format(i))
+            eval_rewards.append(reward)
+            stacked_state = next_stacked_state
+            if done:
+                break
+            env.render()
 
-            #mapped duckietown action to mapped action
-            if np.array_equal(action,up):
-                action = mapped_actions[0]
-            elif np.array_equal(action,stop):
-                action = mapped_actions[1]
-            elif np.array_equal(action,left):
-                action = mapped_actions[2]
-            elif np.array_equal(action,right):
-                action = mapped_actions[3]
-
-
-            #push Experience to buffer
-            replay_buffer.push(stacked_state, action, reward, next_stacked_state, done)
-            episode_rewards.append(reward)
-
-            #For LOSS ONLY
-            #sample mini_batch from buffer:   state_batch and next_state_batch --> (64,4,84,84)  action_batch and reward_batch --> (64,1)
-            state_batch, action_batch, reward_batch, next_state_batch, done = replay_buffer.sample(batch_size)
-            #print("action_batch:",action_batch)
-            #pass mini-batches for Calculation of loss
-            DQN_optimizer.zero_grad()
-            loss = compute_loss(batch_size, state_batch, action_batch, reward_batch, next_state_batch, done)
-            loss.backward()
-            DQN_optimizer.step()
-
-            loss_list.append(loss)
-            print('Episode number is {0}/{1} | Step number is {2} | Loss is {3}'.format(i,total_episodes,step,loss))
-            #print("Loss",loss)
-        else:
-            #for making agent explore
-            e = (random.random())%epsilon
-            action = DQN.act(stacked_state, epsilon, e)
-            print(action)
-            next_state, reward, done, _ = env.step(action)
-
-            next_stacked_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
-
-            #mapped duckietown action to mapped action
-            if np.array_equal(action,up):
-                action = mapped_actions[0]
-            elif np.array_equal(action,stop):
-                action = mapped_actions[1]
-            elif np.array_equal(action,left):
-                action = mapped_actions[2]
-            elif np.array_equal(action,right):
-                action = mapped_actions[3]
-
-            replay_buffer.push(stacked_state, action, reward, next_stacked_state, done)
-            episode_rewards.append(reward)
-
-        stacked_state = next_stacked_state
-        if reward<0.05:
-            break
-
-
-
-#-------------------------------------------------evaluation------------------------------------------#
-
-####Save trained_parameters
-PATH =  "./trained_parameters"
-torch.save(DQN.state_dict(),PATH)
-
-#Evaluation parameters
-eval_steps = 50000
-eval_rewards = []
-####Load trained_parameters and test trained agent
-DQN.load_state_dict(torch.load(PATH))
-DQN.eval()
-
-#(84,84,3)
-state = env.reset()
-
-stacked_state, stacked_frames = stack_images(stacked_frames, state.transpose((2, 0, 1)), True)
-for i in range(eval_steps):
-    e = 0.8
-    epsilon = 0.5
-    action = DQN.act(stacked_state, epsilon,e)
-    next_state, reward, done, _ = env.step(action)
-    next_stacked_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
-    print('Eval_steps number is {0}'.format(eval_steps))
-    eval_rewards.append(reward)
-    stacked_state = next_stacked_state
-    env.rener()
-
-print('Evaluation finished')
+    print('Evaluation finished')
