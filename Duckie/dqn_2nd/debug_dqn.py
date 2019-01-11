@@ -153,11 +153,7 @@ def compute_loss(batch_size, state_batch, action_batch, reward_batch, next_state
     done_episode = Variable(torch.FloatTensor(done_episode).cuda())
 
     '''
-    state_batch = Variable(torch.FloatTensor(state_batch))
-    action_batch = Variable(torch.FloatTensor(action_batch))
-    reward_batch = Variable(torch.FloatTensor(reward_batch))
-    next_state_batch = Variable(torch.FloatTensor(next_state_batch))
-    done_episode = Variable(torch.FloatTensor(done_episode))
+
     '''
     #print("action_batch size:",action_batch.shape)
     #print("DQN(state_batch)",DQN(state_batch).shape)
@@ -167,7 +163,6 @@ def compute_loss(batch_size, state_batch, action_batch, reward_batch, next_state
     #print("q_values:", q_values.shape)
     #print("action_batch",action_batch.shape)
 
-    #obtain q_values from network correspoding to the actions collected in memory buffer
     q_values = torch.bmm(action_batch.unsqueeze(1),DQN(state_batch).unsqueeze(2))
 
     next_q_values = DQN(next_state_batch) #nex_q_values --> (64,4)
