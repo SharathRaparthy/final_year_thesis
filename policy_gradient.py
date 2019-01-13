@@ -15,7 +15,7 @@ from itertools import count
 from collections import deque
 
 
-env = gym.make('Breakout-v0')
+env = gym.make('CartPole-v0')
 env.seed(1); torch.manual_seed(1);
 #build policy network
 def data_preprocess(image_frames):
@@ -65,10 +65,13 @@ class PolicyNet(nn.Module):
         model = nn.Sequential(self.input, nn.ReLU(),
                           self.output, nn.Softmax(dim=-1))
         return model(x)
+
+
 class PolicyConvNet(nn.Module):
     """docstring for PolicyConvNet."""
     def __init__(self):
         super(PolicyConvNet, self).__init__()
+
         self.action_size = env.action_space.n
         self.conv1 = nn.Conv2d(4,32,8,stride = 4)
         self.conv2 = nn.Conv2d(32,64,4,stride = 2)
@@ -97,84 +100,122 @@ optimizer = optim.Adam(policy_net.parameters(), lr = learning_rate)
 policy_conv_net = PolicyConvNet().cuda()
 optimizer_conv = optim.Adam(policy_conv_net.parameters(), lr = learning_rate)
 episode_durations = []
-def plot_durations():
-    plt.figure(2)
-    plt.clf()
-    durations_t = torch.FloatTensor(episode_durations)
-    plt.title('Training...')
-    plt.xlabel('Episode')
-    plt.ylabel('Duration')
-    plt.plot(durations_t.numpy())
-    # Take 100 episode averages and plot them too
-    if len(durations_t) >= 100:
-        means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
-        means = torch.cat((torch.zeros(99), means))
-        plt.plot(means.numpy())
-
-    plt.pause(0.001
-action_space = np.arange(env.action_space.n)
+total_rewards = []
+# def plot_durations():
+#     plt.figure(2)
+#     plt.clf()
+#     durations_t = torch.FloatTensor(total_rewards)
+#     plt.title('Training...')
+#     plt.xlabel('Episode')
+#     plt.ylabel('Duration')
+#     plt.plot(durations_t.numpy())
+#     # Take 100 episode averages and plot them too
+#     if len(durations_t) >= 100:
+#         means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
+#         means = torch.cat((torch.zeros(99), means))
+#         plt.plot(means.numpy())
+#
+#     plt.pause(0.001)
 def pg_select_action(state):
 
     state = torch.from_numpy(state).type(torch.FloatTensor)
-    action_probs = policy_conv_net(Variable(state.cuda())).detach().numpy()
-    action = np.random.choice(action_space, p = action_probs)
-    # c = Categorical(state)
-    # action = c.sample()
-    # policy_conv_net.policy_history.append(torch.log(state))
+    state = policy_net(Variable(state)).detach()
+
+    c = Categorical(state)
+    action = c.sample()
+    # policy_net.policy_history.append(c.log_prob(action))
+    logprob = c.log_prob(action)
 
 
-    return action
+    return action, logprob
+def discount_rewards(rewards, gamma=0.99):
+    r = np.array([gamma**i * rewards[i]
+                  for i in range(len(rewards))])
+    # Reverse the array direction for cumsum and then
+    # revert back to the original order
+    r = r[::-1].cumsum()[::-1]
+    return r - r.mean()
+
 def main():
-    number_of_episodes = 10000
+    batch_actions = []
+    batch_rewards = []
+    batch_states = []
+    batch_logprob = []
+    batch_size = 10
+    number_of_episodes = 2000
     running_reward = 10
-    stacked_frames  =  deque([np.zeros((84,84), dtype=np.int) for i in range(stack_size)], maxlen=4)
+    batch_counter = 1
+    # stacked_frames  =  deque([np.zeros((84,84), dtype=np.int) for i in range(stack_size)], maxlen=4)
 
 
     for episodes in range(number_of_episodes):
         state = env.reset()
-        stacked_state, stacked_frames = stack_images(stacked_frames, state, True)
-        for time in range(1000):
-            env.render()
-            stacked_state, stacked_frames = stack_images(stacked_frames, state, False)
+        reward_plots = []
+        states = []
+        actions = []
+        log_probs = []
 
-            state = np.expand_dims(stacked_state, axis=0)
+        policy_net.reward_history = []
+        policy_net.policy_history = []
+        done = False
+        # stacked_state, stacked_frames = stack_images(stacked_frames, state, True)
+        while done == False:
 
-            action = pg_select_action(state)
+            # stacked_state, stacked_frames = stack_images(stacked_frames, state, False)
+
+            # state = np.expand_dims(stacked_state, axis=0)
+
+            action,logprob = pg_select_action(state)
             action = action.cpu()
             #print(action)
             next_state, reward, done, _ = env.step(action.numpy().astype(int))
-            policy_conv_net.reward_history.append(reward)
+            reward_plots.append(reward)
+            states.append(state)
+            actions.append(action)
+            log_probs.append(logprob)
+            policy_net.reward_history.append(reward)
+
             state = next_state
             if done:
-                episode_durations.append(time + 1)
-                plot_durations()
-                break
+                batch_rewards.extend(discount_rewards(policy_net.reward_history, gamma=0.99))
+                # batch_actions.extend(actions.numpy())
+                batch_states.extend(states)
+                batch_logprob.extend(log_probs)
+                total_rewards.append(sum(reward_plots))
+                batch_counter += 1
+
+                if batch_counter ==  batch_size:
+
+
+                    reward_t = torch.FloatTensor(batch_rewards)
+                    states_t = torch.FloatTensor(batch_states)
+                    actions_t = torch.FloatTensor(batch_actions)
+                    prob_t = torch.FloatTensor(batch_logprob)
+
+                    optimizer.zero_grad()
+                    # for i in range(len(batch_states)):
+                    #     state = batch_states[i]
+                    #     action = Variable(torch.FloatTensor(batch_actions[i]))
+                    #     reward = batch_rewards[i]
+                    #     probs = pg_select_action(state)
+
+                    loss = -(Variable(reward_t, requires_grad  = True) * Variable(prob_t,requires_grad  = True)).mean()
+                    print(loss)
+                    loss.backward()
+                    optimizer.step()
+                    batch_rewards = []
+                    batch_actions = []
+                    batch_states = []
+                    batch_logprob = []
 
 
 
-    #calculate the loss and update the weights
-    #calculate the discounted rewards
-        R = 0
-        gamma = 0.99
-        reward = []
-        for rewards in policy_conv_net.reward_history[::-1]:
-            R = rewards + gamma*R
-            reward.insert(0,R)
-
-        reward = torch.FloatTensor(reward)
-        means = torch.mean(reward)
-        std = torch.std(reward)
-        reward = (reward - means)/std
-
-        policies = torch.FloatTensor(policy_conv_net.policy_history)
-        optimizer_conv.zero_grad()
-        loss = (torch.mul(policies,Variable(reward, requires_grad=True)).mul(-1)).mean()
-        loss.backward()
-        optimizer_conv.step()
-
-        running_reward = (running_reward * 0.99) + (time * 0.01)
-        policy_conv_net.reward_history = []
-        policy_conv_net.policy_history = []
-        if episodes % 50 == 0:
-            print('Episode {}\tLast length: {:5d}\tAverage length: {:.2f}'.format(episodes, time, running_reward))
-main()
+                    batch_counter = 1
+            print("\rEp: {} Average of last 10: {:.2f}".format(
+                episodes + 1, np.mean(total_rewards[-10:])), end="")
+            plt.figure(2)
+            plt.clf()
+            plt.plot(total_rewards)
+            plt.pause(0.001)
+    return total_rewards
+total_rewards=main()
