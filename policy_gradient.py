@@ -76,8 +76,7 @@ class PolicyConvNet(nn.Module):
         self.fc1 = nn.Linear(7*7*64,512)
         self.fc2 = nn.Linear(512, self.action_size)
         self.dropout = nn.Dropout(0.2)
-        self.reward_history = []
-        self.policy_history = []
+
     def forward(self,x):
         x = (F.relu(self.conv1(x)))
 
@@ -112,13 +111,17 @@ def plot_durations():
         means = torch.cat((torch.zeros(99), means))
         plt.plot(means.numpy())
 
-    plt.pause(0.001)
+    plt.pause(0.001
+action_space = np.arange(env.action_space.n)
 def pg_select_action(state):
+
     state = torch.from_numpy(state).type(torch.FloatTensor)
-    state = policy_conv_net(Variable(state.cuda()))
-    c = Categorical(state)
-    action = c.sample()
-    policy_conv_net.policy_history.append(c.log_prob(action))
+    action_probs = policy_conv_net(Variable(state.cuda())).detach().numpy()
+    action = np.random.choice(action_space, p = action_probs)
+    # c = Categorical(state)
+    # action = c.sample()
+    # policy_conv_net.policy_history.append(torch.log(state))
+
 
     return action
 def main():
@@ -165,7 +168,7 @@ def main():
 
         policies = torch.FloatTensor(policy_conv_net.policy_history)
         optimizer_conv.zero_grad()
-        loss = (torch.sum(torch.mul(policies,Variable(reward, requires_grad=True)).mul(-1),-1))
+        loss = (torch.mul(policies,Variable(reward, requires_grad=True)).mul(-1)).mean()
         loss.backward()
         optimizer_conv.step()
 
