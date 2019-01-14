@@ -25,6 +25,14 @@ args = parser.parse_args()
 
 
 env = gym.make('Pong-v0')
+def preprocess(image):
+    image = image[35:195]
+    image = image[::2,::2,0]
+    image[image==144] = 0
+    image[image==109] = 0
+    image[image != 0] = 1
+
+    return image.astype(np.float).ravel()
 
 def data_preprocess(image_frames):
     image_frames = rgb2gray(image_frames)
@@ -70,8 +78,8 @@ class PolicyConvNet(nn.Module):
         self.fc1 = nn.Linear(7*7*64,512)
         self.fc2 = nn.Linear(512, self.action_size)
         self.dropout = nn.Dropout(0.2)
-        self.saved_log_probs = []
-        self.rewards = []
+        self.saved_log_probs_conv = []
+        self.rewards_conv = []
 
     def forward(self,x):
         x = (F.relu(self.conv1(x)))
@@ -91,15 +99,16 @@ optimizer_conv = optim.Adam(policy_conv.parameters(),lr=1e-2)
 class Policy(nn.Module):
     def __init__(self):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(4, 128)
-        self.affine2 = nn.Linear(128, 2)
+        self.action_space = env.action_space.n
+        self.input = nn.Linear(6400, 128)
+        self.output = nn.Linear(128, self.action_space)
 
         self.saved_log_probs = []
         self.rewards = []
 
     def forward(self, x):
-        x = F.relu(self.affine1(x))
-        action_scores = self.affine2(x)
+        x = F.relu(self.input(x))
+        action_scores = self.output(x)
         return F.softmax(action_scores, dim=1)
 
 
@@ -110,7 +119,7 @@ eps = np.finfo(np.float32).eps.item()
 
 def select_action(state):
     state = torch.from_numpy(state).float().unsqueeze(0)
-    probs = policy_conv(state.cuda())
+    probs = policy(state.cuda())
     m = Categorical(probs)
     action = m.sample()
     policy.saved_log_probs.append(m.log_prob(action))
@@ -128,10 +137,10 @@ def finish_episode():
     rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
     for log_prob, reward in zip(policy.saved_log_probs, rewards):
         policy_loss.append(-log_prob * reward)
-    optimizer_conv.zero_grad()
+    optimizer.zero_grad()
     policy_loss = torch.cat(policy_loss).sum()
     policy_loss.backward()
-    optimizer_conv.step()
+    optimizer.step()
     del policy.rewards[:]
     del policy.saved_log_probs[:]
 
@@ -145,17 +154,25 @@ def main():
     stack_size = 4
     durations = []
     total_rewards = []
+    use_conv = False
+    num_episodes = 5000
 
     stacked_frames  =  deque([np.zeros((84,84), dtype=np.int) for i in range(stack_size)], maxlen=4)
-    for i_episode in count(1):
+    for i_episode range(num_episodes):
         state = env.reset()
         rewards = []
-        state, stacked_frames = stack_images(stacked_frames, state, new_episode=True)
+        if use_conv == True:
+            state, stacked_frames = stack_images(stacked_frames, state, new_episode=True)
+        else:
+            state = preprocess(state)
 
         for t in range(10000):  # Don't infinite loop while learning
             action = select_action(state)
             state, reward, done, _ = env.step(action)
-            state, stacked_frames = stack_images(stacked_frames, state, new_episode=False)
+            if use_conv == True:
+                state, stacked_frames = stack_images(stacked_frames, state, new_episode=False)
+            else:
+                state = preprocess(state)
             rewards.append(reward)
             policy.rewards.append(reward)
             if done:
@@ -174,7 +191,7 @@ def main():
         plt.clf()
         plt.plot(durations)
         plt.xlabel('Episodes')
-        plt.ylabel('Durations')
+        plt.ylabel('Rewards')
         plt.pause(0.01)
 
 if __name__ == '__main__':
