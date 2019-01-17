@@ -26,7 +26,7 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
 args = parser.parse_args()
 
 
-env = gym.make('Pong-v0')
+env = gym.make('Enduro-v0')
 def preprocess(image):
     image = image[35:195]
     image = image[::2,::2,0]
@@ -121,7 +121,7 @@ eps = np.finfo(np.float32).eps.item()
 
 def select_action(state):
     state = torch.from_numpy(state).float().unsqueeze(0)
-    probs = policy(state)
+    probs = policy_conv(state)
     m = Categorical(probs)
     action = m.sample()
     log_probabilities = m.log_prob(action)
@@ -159,7 +159,7 @@ def discounted(r, gamma = 0.99):
 def main():
     stack_size = 4
     total_rewards = []
-    use_conv = False
+    use_conv = True
     num_episodes = 5000
     rewards = []
     running_reward = None
@@ -187,7 +187,7 @@ def main():
             log_prob_actions.append(log_actions)
             reward_sum += reward
             if done:
-                episode_logprobs = torch.Tensor(log_prob_actions)
+                episode_logprobs = Variable(torch.Tensor(log_prob_actions), requires_grad=True)
                 episode_rewards = (rewards)
                 log_prob_actions = []
                 rewards = []
@@ -197,11 +197,12 @@ def main():
                 discounted_ep_reward = discounted_ep_reward - torch.mean(discounted_ep_reward)
                 discounted_ep_reward = discounted_ep_reward/torch.std(discounted_ep_reward)
                 episode_loss = -(episode_logprobs)*(discounted_ep_reward)
-                episode_loss = (Variable(torch.Tensor(episode_loss), requires_grad=True)).mean()
-                optimizer.zero_grad()
+                episode_loss = (Variable(torch.Tensor(episode_loss))).sum()
+                optimizer_conv.zero_grad()
                 episode_loss.backward()
-                optimizer.step()
+                optimizer_conv.step()
                 running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
+                print(f'Running Reward after episode {i_episode} is {running_reward}')
 
 
                 break
