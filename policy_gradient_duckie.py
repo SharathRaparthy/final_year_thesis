@@ -81,12 +81,10 @@ class PolicyConvNet(nn.Module):
         #                       self.fc2, nn.Softmax(dim=-1))
         return vels,x
 
-policy_net = PolicyNet()
-learning_rate = 0.01
-optimizer = optim.Adam(policy_net.parameters(), lr = learning_rate)
+
 #initialize policy conv net
-policy_conv_net = PolicyConvNet().cuda()
-optimizer_conv = optim.Adam(policy_conv_net.parameters(), lr = learning_rate)
+policy_conv_net = PolicyConvNet()
+optimizer_conv = optim.Adam(policy_conv_net.parameters(), lr = 0.01)
 
 def plot_durations(total_rewards):
     plt.figure(2)
@@ -103,85 +101,87 @@ def plot_durations(total_rewards):
     #     plt.plot(means.numpy())
 
     plt.pause(0.001)
-def pg_select_action(state):
-
-    state = torch.from_numpy(state).type(torch.FloatTensor)
-    vels, probs = policy_conv_net(Variable(state.cuda()))
-
-
-
-    c = Categorical(probs)
-    # action = c.sample()
-    print(action)
-    log_probs = c.log_prob(action)
-
-    # policy_conv_net.policy_history.append(torch.log(state))
+def select_action(state):
+    state = torch.from_numpy(state).float().unsqueeze(0)
+    probs = policy_conv_net(state)
+    m = Categorical(probs)
+    action = m.sample()
+    log_probabilities = m.log_prob(action)
+    return action.item(), log_probabilities
 
 
     return action,log_probs
+def discounted(r, gamma = 0.99):
+  """ take 1D float array of rewards and compute discounted reward """
+  discounted_r = np.zeros_like(r)
+  discounted_reward = []
+  running_add = 0
+  for t in reversed(range(0, r.size)):
+    #if r[t] != 0: running_add = 0 # reset the sum, since this was a game boundary (pong specific!)
+    running_add = running_add * gamma + r[t]
+    discounted_r[t] = running_add
+    return discounted_r
+
 def main():
-    number_of_episodes = 10000
-    running_reward = 10
+    stack_size = 4
+    total_rewards = []
+    use_conv = True
+    num_episodes = 5000
+    rewards = []
+    running_reward = None
+    reward_sum = 0
+    log_prob_actions = []
+
     stacked_frames  =  deque([np.zeros((84,84), dtype=np.int) for i in range(stack_size)], maxlen=4)
-
-
-    for episodes in range(number_of_episodes):
-
+    for i_episode in range(num_episodes):
         state = env.reset()
-        stacked_state, stacked_frames = stack_images(stacked_frames, state, True)
-
-        rewards = []
-        total_rewards = []
-        log_probabilities = []
-
-        for time in count():
-            env.render()
+        print("!!!!!!!!!!!!!!!!!!!!!!")
+        print(env.action_space.shape[0])
 
 
-            state = np.expand_dims(stacked_state, axis=0)
+        if use_conv == True:
+            state, stacked_frames = stack_images(stacked_frames, state, new_episode=True)
+        else:
+            # state = preprocess(state)
+            state = env.reset()
 
-            action,log_probs = pg_select_action(state)
-            action = action.cpu()
-            print(action)
+        for t in range(10000):  # Don't infinite loop while learning
+            action, log_actions = select_action(state)
+            state, reward, done, _ = env.step(action)
+            if use_conv == True:
+                state, stacked_frames = stack_images(stacked_frames, state, new_episode=False)
+            # else:
 
-            #print(action)
-            next_state, reward, done, _ = env.step(action.detach().numpy())
-
+                # state = preprocess(state)
             rewards.append(reward)
-            log_probabilities.append(log_probs)
-            state = next_state
-            stacked_state, stacked_frames = stack_images(stacked_frames, state, False)
+            log_prob_actions.append(log_actions)
+            reward_sum += reward
             if done:
+                episode_logprobs = Variable(torch.Tensor(log_prob_actions), requires_grad=True)
+                episode_rewards = (rewards)
+                log_prob_actions = []
+                rewards = []
+                discounted_ep_reward = discounted(np.array(episode_rewards))
+                d = discounted_ep_reward
+                discounted_ep_reward = torch.Tensor(discounted_ep_reward)
+
+                discounted_ep_reward = discounted_ep_reward - torch.mean(discounted_ep_reward)
+                discounted_ep_reward = discounted_ep_reward/torch.std(discounted_ep_reward)
+                episode_loss = -(episode_logprobs)*(discounted_ep_reward)
+                episode_loss = (Variable(torch.Tensor(episode_loss), requires_grad=True)).sum()
+                optimizer_conv.zero_grad()
+                episode_loss.backward()
+                optimizer_conv.step()
+                running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
+                print(f'Running Reward after episode {i_episode} is {d.sum()}')
+
+
                 break
 
 
 
-    #calculate the loss and update the weights
-    #calculate the discounted rewards
-        R = 0
-        gamma = 0.99
-        reward = []
-        for rewards in rewards[::-1]:
-            R = rewards + gamma*R
-            reward.insert(0,R)
-        discounted_reward.append(sum(reward))
-        plot_durations(discounted_reward)
 
-        reward = torch.FloatTensor(reward)
-        reward = Variable(reward, requires_grad=True)
-        log_probabilities = torch.FloatTensor(log_probabilities)
-        means = torch.mean(reward)
-        std = torch.std(reward)
-        reward = (reward - means)/std
 
-        selected_logprobs = reward*log_probabilities
-        optimizer_conv.zero_grad()
-        loss = -selected_logprobs.mean()
-        loss.backward()
-        optimizer_conv.step()
 
-        running_reward = (running_reward * 0.99) + (time * 0.01)
-
-        if episodes % 50 == 0:
-            print('Episode {}\tLast length: {:5d}\tAverage length: {:.2f}'.format(episodes, time, running_reward))
-main()
+if __name__ == '__main__':
+    main()

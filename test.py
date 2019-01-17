@@ -28,9 +28,10 @@ import gym
 # else:
 #     env = gym.make(args.env_name)
 
-env = gym.make('Enduro-v0')
+env = gym.make('Breakout-v0')
 observation = env.reset()
+print(observation)
 for _ in range(1000):
   action = env.action_space.sample() # your agent here (this takes random actions)
   observation, reward, done, info = env.step(action)
-  print(action)
+  print(reward)
