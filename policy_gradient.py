@@ -6,6 +6,8 @@ from collections import deque
 from skimage.color import rgb2gray
 from skimage import transform
 import torch
+from torch.autograd import Variable
+
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -93,15 +95,15 @@ class PolicyConvNet(nn.Module):
         # model = nn.Sequential(self.conv1, nn.ReLU(),self.conv2, nn.ReLU(),self.conv3, nn.ReLU(),self.fc1, nn.ReLU(),
         #                       self.fc2, nn.Softmax(dim=-1))
         return x
-policy_conv = PolicyConvNet().cuda()
+policy_conv = PolicyConvNet()
 optimizer_conv = optim.Adam(policy_conv.parameters(),lr=1e-2)
 
 class Policy(nn.Module):
     def __init__(self):
         super(Policy, self).__init__()
         self.action_space = env.action_space.n
-        self.input = nn.Linear(6400, 128)
-        self.output = nn.Linear(128, self.action_space)
+        self.input = nn.Linear(6400, 200)
+        self.output = nn.Linear(200, self.action_space)
 
         self.saved_log_probs = []
         self.rewards = []
@@ -119,11 +121,11 @@ eps = np.finfo(np.float32).eps.item()
 
 def select_action(state):
     state = torch.from_numpy(state).float().unsqueeze(0)
-    probs = policy(state.cuda())
+    probs = policy(state)
     m = Categorical(probs)
     action = m.sample()
-    policy.saved_log_probs.append(m.log_prob(action))
-    return action.item()
+    log_probabilities = m.log_prob(action)
+    return action.item(), log_probabilities
 
 
 def finish_episode():
@@ -144,55 +146,70 @@ def finish_episode():
     del policy.rewards[:]
     del policy.saved_log_probs[:]
 
-def discounted(reward, gamma = 0.99):
-    R = 0
-    for r in reward[::-1]:
-        R = r + gamma*R
-    return R
+def discounted(r, gamma = 0.99):
+  """ take 1D float array of rewards and compute discounted reward """
+  discounted_r = np.zeros_like(r)
+  discounted_reward = []
+  running_add = 0
+  for t in reversed(range(0, r.size)):
+    if r[t] != 0: running_add = 0 # reset the sum, since this was a game boundary (pong specific!)
+    running_add = running_add * gamma + r[t]
+    discounted_r[t] = running_add
+    return discounted_r
 def main():
-    running_reward = 10
     stack_size = 4
-    durations = []
     total_rewards = []
     use_conv = False
     num_episodes = 5000
+    rewards = []
+    running_reward = None
+    reward_sum = 0
+    log_prob_actions = []
 
     stacked_frames  =  deque([np.zeros((84,84), dtype=np.int) for i in range(stack_size)], maxlen=4)
-    for i_episode range(num_episodes):
+    for i_episode in range(num_episodes):
         state = env.reset()
-        rewards = []
+
+
         if use_conv == True:
             state, stacked_frames = stack_images(stacked_frames, state, new_episode=True)
         else:
             state = preprocess(state)
 
         for t in range(10000):  # Don't infinite loop while learning
-            action = select_action(state)
+            action, log_actions = select_action(state)
             state, reward, done, _ = env.step(action)
             if use_conv == True:
                 state, stacked_frames = stack_images(stacked_frames, state, new_episode=False)
             else:
                 state = preprocess(state)
             rewards.append(reward)
-            policy.rewards.append(reward)
+            log_prob_actions.append(log_actions)
+            reward_sum += reward
             if done:
-                durations.append(discounted(rewards, gamma=0.99))
-                total_rewards.append(rewards)
+                episode_logprobs = torch.Tensor(log_prob_actions)
+                episode_rewards = (rewards)
+                log_prob_actions = []
+                rewards = []
+                discounted_ep_reward = discounted(np.array(episode_rewards))
+                discounted_ep_reward = torch.Tensor(discounted_ep_reward)
+
+                discounted_ep_reward = discounted_ep_reward - torch.mean(discounted_ep_reward)
+                discounted_ep_reward = discounted_ep_reward/torch.std(discounted_ep_reward)
+                episode_loss = -(episode_logprobs)*(discounted_ep_reward)
+                episode_loss = (Variable(torch.Tensor(episode_loss), requires_grad=True)).mean()
+                optimizer.zero_grad()
+                episode_loss.backward()
+                optimizer.step()
+                running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
+
+
                 break
 
-        running_reward = running_reward * 0.99 + t * 0.01
 
-        finish_episode()
 
-        if i_episode % args.log_interval == 0:
-            print('Episode {}\tLast length: {:5d}\tAverage length: {:.2f}'.format(
-                i_episode, t, running_reward))
-        plt.figure(2)
-        plt.clf()
-        plt.plot(durations)
-        plt.xlabel('Episodes')
-        plt.ylabel('Rewards')
-        plt.pause(0.01)
+
+
 
 if __name__ == '__main__':
     main()
