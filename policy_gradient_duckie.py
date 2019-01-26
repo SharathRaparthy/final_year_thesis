@@ -30,8 +30,6 @@ def data_preprocess(image_frames):
     normalize_image = image_frames/255.0
     preprocessed_frame = transform.resize(normalize_image, [84,84], mode = 'reflect')
 
-
-
     return preprocessed_frame
 stack_size = 4
 stacked_frames  =  deque([np.zeros((84,84), dtype=np.int) for i in range(stack_size)], maxlen=4)
