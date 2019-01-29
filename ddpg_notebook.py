@@ -245,7 +245,6 @@ class Agent():
 
 
         states, actions, rewards, next_states, dones = experiences
-        print(actions.shape)
         # ---------------------------- update critic ---------------------------- #
         # Get predicted next-state actions and Q values from target models
         actions_next = self.actor_target(next_states)
@@ -343,7 +342,7 @@ class DtRewardWrapper(gym.RewardWrapper):
         elif reward > 0:
             reward += 10
         else:
-            reward += 4
+            reward -= 4
 
         return reward
 
@@ -361,8 +360,28 @@ class ActionWrapper(gym.ActionWrapper):
 # In[ ]:
 
 
-env = gym.make('Duckietown-small_loop-v0')
-env.seed(1); torch.manual_seed(1);
+def launch_env(id=None):
+    env = None
+    if id is None:
+        from gym_duckietown.simulator import Simulator
+        env = Simulator(
+            seed=123, # random seed
+            map_name="loop_empty",
+            max_steps=500001, # we don't want the gym to reset itself
+            domain_rand=0,
+            camera_width=640,
+            camera_height=480,
+            accept_start_angle_deg=4, # start close to straight
+            full_transparency=True,
+            distortion=True,
+        )
+    else:
+        env = gym.make(id)
+
+    return env
+env = launch_env()
+#env = gym.make('Duckietown-udem1-v0')
+
 env = ResizeWrapper(env)
 env = NormalizeWrapper(env)
 env = ImgWrapper(env) # to make the images from 160x120x3 into 3x160x120
@@ -373,9 +392,8 @@ env = DtRewardWrapper(env)
 # In[ ]:
 
 
-env.seed(2)
-BUFFER_SIZE = 10000  # replay buffer size
-BATCH_SIZE = 32        # minibatch size
+BUFFER_SIZE = 20000  # replay buffer size
+BATCH_SIZE = 64        # minibatch size
 GAMMA = 0.99            # discount factor
 TAU = 1e-3              # for soft update of target parameters
 LR_ACTOR = 1e-4         # learning rate of the actor
@@ -397,19 +415,23 @@ def ddpg(n_episodes=15000, max_t=5000001, print_every=100):
 
     scores = []
     score = 0
-    start_timesteps = 10
+    start_timesteps = 1e4
     episode_reward = 0
     episode_timesteps = 500
     env_timesteps = 0
     done = False
+    reward = 0
 #     for i_episode in range(1, n_episodes+1):
     state = env.reset()
     while total_timesteps < max_timesteps:
+        if reward == -10:
+            state = env.reset()
+            done = True
         if done:
             print('Total TimeSteps: {}, Episode Number: {}, Episode Reward: {}'.format(total_timesteps,n_episodes,score))
 
-            #torch.save(agent.actor_local.state_dict(), 'checkpoint_actor.pth')
-            #torch.save(agent.critic_local.state_dict(), 'checkpoint_critic.pth')
+            torch.save(agent.actor_local.state_dict(), 'checkpoint_actor_EXP3.pth')
+            torch.save(agent.critic_local.state_dict(), 'checkpoint_critic_EXP3.pth')
             env_timesteps = 0
             n_episodes += 1
             state = env.reset()
@@ -418,12 +440,14 @@ def ddpg(n_episodes=15000, max_t=5000001, print_every=100):
 
         if total_timesteps < start_timesteps:
             action = env.action_space.sample()
+            action[0] = np.clip(action[0],0,1)
             next_state, reward, done, _ = env.step(action)
         else:
             action = agent.act(state)
-
+            action[0] = np.clip(action[0],0,1)
             scores.append(score)
             next_state, reward, done, _ = env.step(action)
+        #print(action)
 
         agent.step(state, action, reward, next_state, done)
         state = next_state
@@ -431,44 +455,18 @@ def ddpg(n_episodes=15000, max_t=5000001, print_every=100):
 
         if env_timesteps > episode_timesteps:
             done = True
-        if reward < 2:
-            done = True
+
         total_timesteps += 1
         env_timesteps += 1
-
-
-#         state = env.reset()
-
-#         agent.reset()
-#         score = 0
-#         for t in range(max_t):
-
-#             action = agent.act(state)
-#             next_state, reward, done, _ = env.step(action[0])
-#             agent.step(state, action, reward, next_state, done)
-#             state = next_state
-
-#             score += reward
-#             if done:
-#                 break
-#         scores_deque.append(score)
-
-#         print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores_deque)), end="")
-#         torch.save(agent.actor_local.state_dict(), 'checkpoint_actor.pth')
-#         torch.save(agent.critic_local.state_dict(), 'checkpoint_critic.pth')
-#         if i_episode % print_every == 0:
-#             print('\rEpisode {}\tAverage Score: {:.2f}'.format(i_episode, np.mean(scores_deque)))
-
     return scores
 
 scores = ddpg()
+plot = True
+if plot == True:
 
-fig = plt.figure()
-ax = fig.add_subplot(111)
-plt.plot(np.arange(1, len(scores)+1), scores)
-plt.ylabel('Score')
-plt.xlabel('Episode #')
-plt.show()
-
-
-# In[ ]:
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    plt.plot(np.arange(1, len(scores)+1), scores)
+    plt.ylabel('Score')
+    plt.xlabel('Episode #')
+    plt.show()
