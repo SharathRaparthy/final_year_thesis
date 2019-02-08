@@ -11,9 +11,11 @@ from skimage import transform
 import torch.nn.functional as F
 
 ##import libraries related to DuckietownEnv
+import argparse
 import gym_duckietown
 from gym_duckietown.envs import DuckietownEnv
 from gym_duckietown.simulator import Simulator
+from gym_duckietown.wrappers import UndistortWrapper
 
 # if gpu is to be used
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -77,8 +79,8 @@ def stack_images(stacked_frames, state, new_episode):
 #Training parameters
 action_size = 4 #[left,rigth,up,stop]
 gamma = 0.95
-total_episodes = 50
-total_steps = 20000
+total_episodes = 20
+total_steps = 15000
 batch_size = 64
 #Exploration-Exploitation parameters
 explore_start = 0.9
@@ -124,28 +126,33 @@ class DeepQNet(nn.Module):
 ####Calculate Loss for training
 def compute_loss(batch_size, state, action, reward, next_state, done_episode):
     #convert state,action,reward,next_state,done_episode to tensor Variable
-    state = Variable(torch.FloatTensor(state)).cuda()
-    action = Variable(torch.LongTensor(action)).cuda()
-    reward = Variable(torch.FloatTensor(reward)).cuda()
-    next_state = Variable(torch.FloatTensor(next_state)).cuda()
-    done_episode = Variable(torch.FloatTensor(done_episode)).cuda()
+    state = Variable(torch.FloatTensor(state).cuda())
+    action = Variable(torch.LongTensor(action).cuda())
+    reward = Variable(torch.FloatTensor(reward).cuda())
+    next_state = Variable(torch.FloatTensor(next_state).cuda())
+    done_episode = Variable(torch.FloatTensor(done_episode).cuda())
 
 
-    action = action.unsqueeze(1)
-    q_values = DQN(state).gather(1, action)
+    #action = action.unsqueeze(1)
+    q_values = DQN(state)
+    q_value = q_values.max(1)[0]
 
-    #Calculate q values for next_state
-    next_q_values = DQN(next_state)
+    if done_episode[0]:
+    	next_q_values = reward
+    else:
+        next_q_values = DQN(next_state)
+
+
 
     #Bellman Function
     expected_q_value = reward + gamma*next_q_values.max(1)[0].detach()
-    expected_q_value = expected_q_value.unsqueeze(1)
+    #expected_q_value = expected_q_value.unsqueeze(1)
 
     #Loss Calculate
-    loss = F.smooth_l1_loss(q_values, expected_q_value)
+    #loss = F.smooth_l1_loss(q_value, expected_q_value)
+    loss = ( Variable(expected_q_value) - q_value).pow(2).mean()
 
-    if done_episode[0]:
-        expected_q_value = reward
+
 
     return loss
 
@@ -186,6 +193,7 @@ for i in range(total_episodes):
         decay_step += 1
         #exponential decay of exploration rate
         epsilon = explore_stop + (explore_start - explore_stop) * np.exp(-decay_rate * decay_step)
+
         #if buffer size crosses batch_size
         if len(replay_buffer) > batch_size:
             if len(replay_buffer) == batch_size:
@@ -194,11 +202,11 @@ for i in range(total_episodes):
             state_small = state
             #sample mini_batch from buffer
             state, action_sample, reward_sample, next_state_sample, done_sample = replay_buffer.sample(batch_size)
-
+            #print("argato",state.shape)
             action = DQN.act(state, epsilon, e)
-            print("Action:" action)
+            print("Action:", action)
             next_state, reward, done, _ = env.step(action)
-            print("Reward:" reward)
+            print("Reward:", reward)
             next_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
             #push Experience to buffer
             replay_buffer.push(state_small, action, reward, next_state, done)
@@ -220,7 +228,8 @@ for i in range(total_episodes):
             next_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
             replay_buffer.push(state, action, reward, next_state, done)
             episode_rewards.append(reward)
-
+        if reward<0.05:
+            break
         state = next_state
 
 
@@ -245,7 +254,7 @@ for i in range(eval_steps):
     action = DQN.act(state, epsilon,e)
     next_state, reward, done, _ = env.step(action)
     next_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
-
+    env.render()
     eval_rewards.append(reward)
     state = next_state
 

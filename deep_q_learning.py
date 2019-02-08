@@ -14,7 +14,14 @@ import gym_duckietown
 from gym_duckietown.envs import DuckietownEnv
 from gym_duckietown.simulator import Simulator
 import torch.nn.functional as F
+<<<<<<< HEAD
 from skimage import transform
+=======
+
+
+# if gpu is to be used
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+>>>>>>> bdf2ed24b2eac426b8bc6733961ed3b609053a03
 
 #initialise the environment
 
@@ -75,6 +82,7 @@ def stack_images(stacked_frames, state, new_episode):
         stacked_frames.append(frame)
         stacked_frames.append(frame)
         stacked_state = np.stack(stacked_frames, axis = 0)
+        print(stacked_state.shape)
     else:
     	stacked_frames.append(frame)
     	stacked_state = np.stack(stacked_frames, axis = 0)
@@ -108,10 +116,17 @@ discounted_rate = 0.9
 memory_size = 1000000 # need to finalize
 
 #build network architecture
+<<<<<<< HEAD
 class DeepQN(nn.Module):
     """docstring forDQN."""
     def __init__(self, state_size, action_size = 3):
         super(DeepQN, self).__init__()
+=======
+class DeepQNet(nn.Module):
+    """docstring forDeepQNet."""
+    def __init__(self, state_size, action_size = action_size):
+        super(DeepQNet, self).__init__()
+>>>>>>> bdf2ed24b2eac426b8bc6733961ed3b609053a03
         self.conv1 = nn.Conv2d(4,32,8,stride = 4)
         self.conv2 = nn.Conv2d(32,64,4,stride = 2)
         self.conv3 = nn.Conv2d(64,64,3,stride = 1)
@@ -129,6 +144,7 @@ class DeepQN(nn.Module):
         x = self.fc2(x)
         return x
 
+<<<<<<< HEAD
     def act(self,state, epsilon):
         if random.random() > epsilon:
             state = Variable(torch.FloatTensor(state), volatile=True)
@@ -137,11 +153,54 @@ class DeepQN(nn.Module):
         else:
             action = possible_actions[random.randrange(len(possible_actions))]# need to define possible actions and check for 2 action list
         return action
+=======
+    def act(self,state, epsilon, e):
+        if e > epsilon:
+            #state, action, reward, next_state, done = batch_sampling(batch_size, done_episode)
+            state = Variable(torch.FloatTensor(state), device = device, volatile=True)
+            print('exploitation')
+            q_value = self.forward(state)
+            #action = q_value.max(1)[1].view(1, 1)
+            action = q_value.max(1)[1].data[0]
+        else:
+            action = random.randrange(env.action_space.n)
+            print(action)
+        return action
 
 
 
+def compute_loss(batch_size, state, action, reward, next_state, done_episode):
+    #state, action, reward, next_state, done = batch_sampling(batch_size, done_episode)
+
+    #state, action, reward, next_state, done = replay_buffer.sample(batch_size)
+    state = Variable(torch.FloatTensor(state), device = device)
+    action = Variable(torch.LongTensor(action), device = device)
+    reward = Variable(torch.FloatTensor(reward), device = device)
+    next_state = Variable(torch.FloatTensor(next_state), device = device)
+    done_episode = Variable(torch.FloatTensor(done_episode), device = device)
+
+    action = action.unsqueeze(1)
+    q_values = DQN(state).gather(1, action)
+
+>>>>>>> bdf2ed24b2eac426b8bc6733961ed3b609053a03
 
 
+
+<<<<<<< HEAD
+
+
+=======
+    next_q_values = DQN(next_state)
+
+    expected_q_value = reward + gamma*next_q_values.max(1)[0].detach()
+    expected_q_value = expected_q_value.unsqueeze(1)
+
+    loss = F.smooth_l1_loss(q_values, expected_q_value)
+    if done_episode[0]:
+        expected_q_value = reward
+
+    return loss
+>>>>>>> bdf2ed24b2eac426b8bc6733961ed3b609053a03
 
 class BufferReplay(object):
     """docstring forBufferReplay."""
@@ -189,18 +248,37 @@ def compute_loss(batch_size, done_episode):
 
 
 #initialise network and optimizers
+<<<<<<< HEAD
 DQN_optimizer = optim.Adam(DQN.parameters(), lr = learning_rate)
+=======
+state = env.reset()
+DQN = DeepQNet(state).to(device)
+DQN_optimizer = optim.Adam(DQN.parameters(), lr = 0.0002)
+>>>>>>> bdf2ed24b2eac426b8bc6733961ed3b609053a03
 loss_list = []
 #training loop
 #buffer_loop = 500
+
+
 
 for i in range(total_episodes):
     step = 0
     decay_step = 0
     episode_rewards = []
+<<<<<<< HEAD
     state = env.reset()
     state, stacked_frames = stack_images(stacked_frames, state.transpose((2, 0, 1)), True)
     print('hhi')
+=======
+    #epsilon = explore_stop + (explore_start - explore_stop) * np.exp(-decay_rate * decay_step)
+    state = env.reset()
+    state = state.transpose((2, 0, 1))
+    state, stacked_frames = stack_images(stacked_frames, state, True)
+    #action = DQN.act(state, epsilon)
+    #next_state, reward, done, _ = env.step(action)
+    #next_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
+    #state = next_state
+>>>>>>> bdf2ed24b2eac426b8bc6733961ed3b609053a03
 
     while step < total_steps:
         step = step + 1
@@ -208,6 +286,10 @@ for i in range(total_episodes):
         epsilon = explore_stop + (explore_start - explore_stop) * np.exp(-decay_rate * decay_step)
         print('koi')
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> bdf2ed24b2eac426b8bc6733961ed3b609053a03
 
         if step == total_steps:
             total_steps = step
@@ -244,6 +326,7 @@ torch.save(DQN.state_dict(),PATH)
 DQN.load_state_dict(torch.load(PATH))
 DQN.eval()
 
+<<<<<<< HEAD
 state = env.reset()
 state, stacked_frames = stack_images(stacked_frames, state.transpose((2, 0, 1)), True)
 for i in range(50000):
@@ -253,3 +336,37 @@ for i in range(50000):
     state = next_state
 
 print('Evaluation finished')
+=======
+
+
+        if len(replay_buffer) > batch_size:
+            if len(replay_buffer) == batch_size:
+                loss = 0
+            e = random.random()
+            state_small = state
+            state, action_sample, reward_sample, next_state_sample, done_sample = replay_buffer.sample(batch_size)
+            action = DQN.act(state, epsilon, e)
+            print(action)
+            next_state, reward, done, _ = env.step(action)
+            print(reward)
+            next_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
+
+            replay_buffer.push(state_small, action, reward, next_state, done)
+            episode_rewards.append(reward)
+            DQN_optimizer.zero_grad()
+            loss = compute_loss(batch_size, state, action_sample, reward_sample, next_state_sample, done_sample)
+            loss.backward()
+            DQN_optimizer.step()
+            loss_list.append(loss)
+            print(f'Episode number is {i}/{total_episodes} | Step number is {step} | Loss is {loss}')
+        else:
+            e = (random.random())%epsilon#not correct
+            action = DQN.act(state, epsilon, e)
+            print(action)
+            next_state, reward, done, _ = env.step(action)
+            next_state, stacked_frames = stack_images(stacked_frames, next_state.transpose((2, 0, 1)), False)
+            replay_buffer.push(state, action, reward, next_state, done)
+            episode_rewards.append(reward)
+
+        state = next_state
+>>>>>>> bdf2ed24b2eac426b8bc6733961ed3b609053a03
