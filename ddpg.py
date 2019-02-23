@@ -20,6 +20,7 @@ import time
 import os
 import matplotlib.image as mpimg
 from skimage.color import rgb2gray
+import pickle
 # def rgb2gray(rgb):
 #     return np.dot(rgb[...,:3], [0.299, 0.587, 0.114])
 
@@ -178,15 +179,18 @@ class ReplayBuffer:
         """Add a new experience to memory."""
         e = self.experience(state, action, reward, next_state, done)
         self.memory.append(e)
-
+    def save(self):
+        with open("experiences.txt", "wb") as fp:
+            pickle.dump(self.memory, fp)
+    def open(self):
+        with open("experiences.txt", "rb") as fo:
+            b = pickle.load(fo)
+            self.memory = b
     def sample(self):
         """Randomly sample a batch of experiences from memory."""
         experiences = random.sample(self.memory, k=self.batch_size)
 
 #         states, actions, rewards, next_states, dones = np.expand_dims(experience.state, axis=0),np.expand_dims(actions,axis=0),np.expand_dims(reward,axis=0) ,np.expand_dims(next_state,axis=0) ,np.expand_dims(done,axis=0)
-
-
-
         states = torch.from_numpy(np.stack([e.state for e in experiences if e is not None],axis=0)).float().to(device)
 
 
@@ -244,6 +248,7 @@ class Agent():
         if len(self.memory) > BATCH_SIZE:
             experiences = self.memory.sample()
             self.learn(experiences, GAMMA)
+
 
     def act(self, state, add_noise=True):
         """Returns actions for given state as per current policy."""
@@ -408,7 +413,7 @@ def stack_images(stacked_frames, state, new_episode):
     	stacked_frames.append(frame)
     	stacked_state = np.stack(stacked_frames, axis = 0)
     return stacked_state, stacked_frames
-BUFFER_SIZE = 15000  # replay buffer size |EXP-4: 20k| EXP5: 20k |
+BUFFER_SIZE = 2  # replay buffer size |EXP-4: 20k| EXP5: 20k |
 BATCH_SIZE = 16        # minibatch size |EXP-4:128| EXP5: 32 |
 GAMMA = 0.99            # discount factor |EXP-4:0.99| EXP5: 0.99 |
 TAU = 0.001              # for soft update of target parameters |EXP-4:1e-3| EXP5: 0.001 |
@@ -451,7 +456,7 @@ def ddpg():
 #     for i_episode in range(1, n_episodes+1):
     state = env.reset()
 
-    save = True
+    save = False
 
     while total_timesteps < max_timesteps:
         state, stacked_frames = stack_images(stacked_frames,state, True)
