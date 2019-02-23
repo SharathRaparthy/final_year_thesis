@@ -5,7 +5,7 @@ import gym
 from gym import spaces
 import numpy as np
 import time
-from ddpg_notebook import Actor
+from ddpg import Actor, stacked_frames, data_preprocess
 
 class ResizeWrapper(gym.ObservationWrapper):
     def __init__(self, env=None, shape=(120, 160, 3)):
@@ -58,11 +58,11 @@ class DtRewardWrapper(gym.RewardWrapper):
 
     def reward(self, reward):
         if reward == -1000:
-            reward = -10
-        elif reward > 0:
-            reward += 10
-        else:
-            reward += 4
+            reward = -5
+        # elif reward > 0:
+        #     reward += 10
+        # else:
+        #     reward += 4
 
         return reward
 
@@ -73,14 +73,13 @@ class ActionWrapper(gym.ActionWrapper):
         super(ActionWrapper, self).__init__(env)
 
     def action(self, action):
-        action_ = [action[0] * 0.8, action[0]]
+        action_ = [action[0] * 0.6, action[1]]
         return action_
 
-
-# In[ ]:
-
-
 env = gym.make('Duckietown-udem1-v0')
+
+
+# Wrappers
 
 env = ResizeWrapper(env)
 env = NormalizeWrapper(env)
@@ -92,22 +91,28 @@ action_size = env.action_space.shape[0]
 max_action = float(env.action_space.high[0])
 
 actor_agent = Actor(state_size, action_size,max_action)
-actor_path = torch.load('/home/ivlabs/users/sharath/final_year_thesis/checkpoint_actor_EXP2.pth')
+actor_path = torch.load('/home/ivlabs/users/sharath/final_year_thesis/ddpg_models/checkpoint_13_actor.pth')
 actor_agent.load_state_dict(actor_path)
+stack_size = 4
+stacked_frames  =  deque([np.zeros((120,160), dtype=np.int) for i in range(stack_size)], maxlen=4)
 state = env.reset()
 with torch.no_grad():
     while True:
         state = env.reset()
+        state, stacked_frames = stack_images(stacked_frames,state, True)
         rewards = []
         while True:
-            env.render()
             state = torch.from_numpy(state).float()
-            state = state.unsqueeze(0)
+            # state = state.unsqueeze(0)
             action = actor_agent(state).cpu().data.numpy()
-            # action[0][0] = np.clip(action[0][0],0,1)
+
+            env.render()
 
             state, reward, done, _ = env.step(action[0])
+            state, stacked_frames = stack_images(stacked_frames, state, False)
             rewards.append(reward)
+
+
             if done:
                 break
         print("Mean Episode Reward:", np.mean(rewards))
